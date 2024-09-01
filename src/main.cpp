@@ -4,6 +4,7 @@
 #include <cstring>
 #include <exception>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/trigonometric.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -30,6 +31,7 @@
 
 #include "shaders.hpp"
 #include "sphere.hpp"
+#include "camera.hpp"
 
 std::string get_exe_path() {
 
@@ -60,6 +62,13 @@ std::string get_exe_path() {
         }
     #endif
 
+}
+
+glm::vec2 get_cursor_pos(GLFWwindow *window) {
+    double x, y;
+    glfwGetCursorPos(window, &x, &y);
+
+    return glm::vec2(x, y);
 }
 
 int main() {
@@ -109,14 +118,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    /*
-    std::array<float, 3*3> vertices = {
-        -0.5f, -0.5f, 0.f,
-        0.5f, -0.5f, 0.f,
-        0.0f,  0.5f, 0.f
-    };*/
-
-    std::vector<float> vertices = Sphere::sphere_vertices();
+    std::vector<float> vertices = Sphere::sphere_vertices(16, 16, 0.5f);
 
     unsigned vao;
     glGenVertexArrays(1, &vao);
@@ -126,50 +128,72 @@ int main() {
 
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(float), vertices.data(), GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    glm::vec3 cam_pos = {0.f, 0.f, 0.f};
-    float cam_angle = 0.f;
-    float cam_move_speed = 1.f;
-    float cam_rot_speed = 3.f;
+    std::vector<glm::mat4> particle_mvps(2);
 
-    //std::chrono::microseconds start_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch());
+    GLuint particle_mvps_ssbo;
+    glGenBuffers(1, &particle_mvps_ssbo);
+
+    Camera::Camera camera;
+    camera.MovementSpeed = 1.f;
+    camera.MouseSensitivity = 0.05f;
+    camera.Zoom = 1.f;
+
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
     auto start_time = std::chrono::high_resolution_clock::now();
     auto end_time = start_time;
 
-    while (!glfwWindowShouldClose(window)) {
+    glm::vec2 start_cursor_pos = get_cursor_pos(window);
+    glm::vec2 end_cursor_pos = start_cursor_pos;
+
+    while (!glfwWindowShouldClose(window) && glfwGetKey(window, GLFW_KEY_ESCAPE) != GLFW_PRESS) {
 
         float delta_time = std::chrono::duration<float>(end_time - start_time).count();
         float fps = (delta_time == 0.f) ? 0.f : 1.f/delta_time;
 
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) cam_pos.z += cam_move_speed*delta_time;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) cam_pos.z -= cam_move_speed*delta_time;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cam_pos.x += cam_move_speed*delta_time;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cam_pos.x -= cam_move_speed*delta_time;
+        glm::vec2 cursor_delta = end_cursor_pos - start_cursor_pos;
 
-        if (glfwGetKey(window, GLFW_KEY_LEFT)) cam_angle -= cam_rot_speed*delta_time;
-        if (glfwGetKey(window, GLFW_KEY_RIGHT)) cam_angle += cam_rot_speed*delta_time;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            camera.ProcessKeyboard(Camera::Camera_Movement::FORWARD, delta_time);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            camera.ProcessKeyboard(Camera::Camera_Movement::BACKWARD, delta_time);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            camera.ProcessKeyboard(Camera::Camera_Movement::LEFT, delta_time);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            camera.ProcessKeyboard(Camera::Camera_Movement::RIGHT, delta_time);
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+            camera.Position.y -= camera.MovementSpeed*delta_time;
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+            camera.Position.y += camera.MovementSpeed*delta_time;
 
-        glm::mat4 projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 1000.f);
-        glm::mat4 cam_translate_mat = glm::mat4(1.f);
-        cam_translate_mat = glm::translate(cam_translate_mat, cam_pos);
-        glm::mat4 cam_rotate_mat = glm::mat4(1.f);
-        cam_rotate_mat = glm::rotate(cam_rotate_mat, cam_angle, glm::vec3(0.f, 1.f, 0.f));
+        camera.ProcessMouseMovement(cursor_delta.x, -cursor_delta.y);
 
-        glm::mat4 translate_mat = glm::mat4(1.f);
-        translate_mat = glm::translate(translate_mat, glm::vec3(0.f, 0.f, -1.f));
-        glm::mat4 rotate_mat = glm::mat4(1.f);
-        rotate_mat = glm::rotate(rotate_mat, 0.785f, glm::vec3(0.f, 1.f, 0.f));
-        glm::mat4 scale_mat = glm::mat4(1.f);
-        scale_mat = glm::scale(scale_mat, glm::vec3(2.f, 1.f, 1.f));
+        glm::mat4 cam_projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 1000.f);
+        glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();//* cam_look_at_mat * cam_translate_mat;
 
-        //glm::mat4 model_mat = translate_mat*rotate_mat*scale_mat;
+        {
+            glm::mat4 translate_mat = glm::mat4(1.f);
+            translate_mat = glm::translate(translate_mat, glm::vec3(0.f, 0.f, -3.f));
 
-        //glm::mat4 mvp = projection_mat * cam_translate_mat * model_mat;
-        glm::mat4 mvp = projection_mat * cam_rotate_mat * cam_translate_mat;
+            particle_mvps[0] = cam_mat * translate_mat;
+        }
+
+        {
+            glm::mat4 translate_mat = glm::mat4(1.f);
+            translate_mat = glm::translate(translate_mat, glm::vec3(3.f, 0.f, -3.f));
+
+            particle_mvps[1] = cam_mat * translate_mat;
+        }
+    
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_mvps_ssbo);
+        glBufferData(GL_SHADER_STORAGE_BUFFER, particle_mvps.size()*sizeof(particle_mvps[0]), glm::value_ptr(particle_mvps[0]), GL_DYNAMIC_DRAW);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_mvps_ssbo);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
         glClearColor(0.f, 0.0f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -180,13 +204,23 @@ int main() {
         glCullFace(GL_BACK);
 
         glUseProgram(shader_program);
-        glUniformMatrix4fv(glGetUniformLocation(shader_program, "mvp"), 1, GL_FALSE, glm::value_ptr(mvp));
+
+        GLint ssbo_binding = 1;
+        GLint block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "mvps");
+        glShaderStorageBlockBinding(shader_program, block_index, particle_mvps_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, ssbo_binding, particle_mvps_ssbo);
 
         glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+        glDrawArraysInstanced(GL_TRIANGLES, 0, vertices.size(), 2);
+
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, ssbo_binding, 0);
+        glUseProgram(0);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+
+        start_cursor_pos = end_cursor_pos;
+        end_cursor_pos = get_cursor_pos(window);
 
         start_time = end_time;
         end_time = std::chrono::high_resolution_clock::now();

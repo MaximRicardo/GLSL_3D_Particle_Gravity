@@ -4,6 +4,6 @@
 
 namespace Sphere {
 
-    std::vector<float> sphere_vertices();
+    std::vector<float> sphere_vertices(unsigned rings, unsigned slices, float radius);
 
 }
