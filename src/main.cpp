@@ -2,16 +2,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
-#include <glm/ext/matrix_clip_space.hpp>
-#include <glm/ext/matrix_float4x4.hpp>
-#include <glm/ext/vector_float3.hpp>
+#include <exception>
+#include <glm/ext/matrix_transform.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <array>
+#include <vector>
+#include <chrono>
 
-//The world if c/c++ was cross-platform: https://www.youtube.com/watch?v=RiZQoXCbcgo
 #ifdef __unix__
     #include <unistd.h>
 #endif
@@ -26,6 +25,11 @@
 //Linear algebra stuff
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_float4x4.hpp>
+#include <glm/ext/vector_float3.hpp>
+
+#include "shaders.hpp"
 
 std::string get_exe_path() {
 
@@ -73,7 +77,9 @@ int main() {
     gladLoadGL();
 
     //Create a glfw window
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "Hello Triangle", NULL, NULL);
+    constexpr unsigned screen_width = 1280;
+    constexpr unsigned screen_height = 720;
+    GLFWwindow* window = glfwCreateWindow(screen_width, screen_height, "Hello Triangle", NULL, NULL);
     if (window == NULL) {
         fprintf(stderr, "Failed to create GLFW window\n");
         glfwTerminate();
@@ -86,74 +92,27 @@ int main() {
 
     //Load in the shaders
     unsigned shader_program;
-    {
-        std::ifstream vertex_shader_file(exe_folder + "../src/shaders/vertex.vert");
-        if (vertex_shader_file.fail()) {
-            std::fprintf(stderr, "Error: Couldn't open vertex shader: %s\n", strerror(errno));
-            glfwTerminate();
-            return EXIT_FAILURE;
-        }
+    try {
+        unsigned vertex_shader = Shaders::create_shader(exe_folder + "../src/shaders/vertex.vert", GL_VERTEX_SHADER);
 
-        std::ostringstream vertex_shader_src_stream;
-        vertex_shader_src_stream << vertex_shader_file.rdbuf();
-        std::string vertex_shader_src = vertex_shader_src_stream.str();
-        const char* vertex_shader_src_cstr = vertex_shader_src.c_str();
+        unsigned fragment_shader = Shaders::create_shader(exe_folder + "../src/shaders/fragment.frag", GL_FRAGMENT_SHADER);
 
-        unsigned vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-        glShaderSource(vertex_shader, 1, &vertex_shader_src_cstr, NULL);
-        glCompileShader(vertex_shader);
-        int success;
-        char info_log[512];
-        glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-        if (!success) {
-            glGetShaderInfoLog(vertex_shader, 512, NULL, info_log);
-            std::fprintf(stderr, "Failed to compile vertex shader!\n%s\n", info_log);
-            glfwTerminate();
-            return EXIT_FAILURE;
-        }
-
-        std::ifstream fragment_shader_file(exe_folder + "../src/shaders/fragment.frag");
-        if (fragment_shader_file.fail()) {
-            std::fprintf(stderr, "Error: Couldn't open fragment shader: %s\n", strerror(errno));
-            glfwTerminate();
-            return EXIT_FAILURE;
-        }
-        std::ostringstream fragment_shader_src_stream;
-        fragment_shader_src_stream << fragment_shader_file.rdbuf();
-        std::string fragment_shader_src = fragment_shader_src_stream.str();
-        const char* fragment_shader_src_cstr = fragment_shader_src.c_str();
-
-        unsigned fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fragment_shader, 1, &fragment_shader_src_cstr, NULL);
-        glCompileShader(fragment_shader);
-        glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
-        if (!success) {
-            glGetShaderInfoLog(fragment_shader, 512, NULL, info_log);
-            std::fprintf(stderr, "Failed to compile vertex shader!\n%s\n", info_log);
-            glfwTerminate();
-            return EXIT_FAILURE;
-        }
-
-        shader_program = glCreateProgram();
-        glAttachShader(shader_program, vertex_shader);
-        glAttachShader(shader_program, fragment_shader);
-        glLinkProgram(shader_program);
-        glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
-        if (!success) {
-            glGetProgramInfoLog(shader_program, 512, NULL, info_log);
-            std::fprintf(stderr, "Failed to link shaders!\n%s\n", info_log);
-            glfwTerminate();
-            return EXIT_FAILURE;
-        }
+        std::vector<unsigned> shaders = {vertex_shader, fragment_shader};
+        shader_program = Shaders::link_shaders(shaders.data(), shaders.size(), "shader_program");
 
         glDeleteShader(vertex_shader);
         glDeleteShader(fragment_shader);
     }
+    catch (std::exception &e) {
+        std::fprintf(stderr, "%s", e.what());
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
 
     std::array<float, 3*3> vertices = {
-        -0.5f, -0.5f, -0.9f,
-        0.5f, -0.5f, -0.9f,
-        0.0f,  0.5f, -0.9f
+        -0.5f, -0.5f, 0.f,
+        0.5f, -0.5f, 0.f,
+        0.0f,  0.5f, 0.f
     };
 
     unsigned vao;
@@ -170,35 +129,50 @@ int main() {
     glEnableVertexAttribArray(0);
 
     glm::vec3 cam_pos = {0.f, 0.f, 0.f};
+    float cam_move_speed = 1.f;
+
+    //std::chrono::microseconds start_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch());
+    auto start_time = std::chrono::high_resolution_clock::now();
+    auto end_time = start_time;
 
     while (!glfwWindowShouldClose(window)) {
 
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) cam_pos.z += 0.001;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) cam_pos.z -= 0.001;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cam_pos.x += 0.001;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cam_pos.x -= 0.001;
+        float delta_time = std::chrono::duration<float>(end_time - start_time).count();
+        float fps = (delta_time == 0.f) ? 0.f : 1.f/delta_time;
 
-        glm::mat4 projection_mat = glm::perspective(glm::radians(60.f), 1280.f/720.f, 0.01f, 100.f);
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) cam_pos.z += cam_move_speed*delta_time;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) cam_pos.z -= cam_move_speed*delta_time;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cam_pos.x += cam_move_speed*delta_time;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cam_pos.x -= cam_move_speed*delta_time;
+
+        glm::mat4 projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 1000.f);
+        glm::mat4 cam_translate_mat = glm::mat4(1.f);
+        cam_translate_mat = glm::translate(cam_translate_mat, cam_pos);
 
         glm::mat4 view_mat = glm::lookAt(
                 cam_pos,
-                glm::vec3(0.f, 0.f, -100.f),
+                glm::vec3(0.f, 0.f, -1000.f),
                 glm::vec3(0.f, 1.f, 0.f)
                 );
 
         glm::mat4 translate_mat = glm::mat4(1.f);
-        translate_mat = glm::translate(translate_mat, cam_pos);
+        translate_mat = glm::translate(translate_mat, glm::vec3(0.f, 0.f, -1.f));
         glm::mat4 rotate_mat = glm::mat4(1.f);
-        rotate_mat = glm::rotate(rotate_mat, 0.f, glm::vec3(0.f, 1.f, 0.f));
+        rotate_mat = glm::rotate(rotate_mat, 0.785f, glm::vec3(0.f, 1.f, 0.f));
         glm::mat4 scale_mat = glm::mat4(1.f);
-        scale_mat = glm::scale(scale_mat, glm::vec3(1.f, 1.f, 1.f));
+        scale_mat = glm::scale(scale_mat, glm::vec3(2.f, 1.f, 1.f));
 
-        //glm::mat4 model_mat = translate_mat*rotate_mat*scale_mat;
+        glm::mat4 model_mat = translate_mat*rotate_mat*scale_mat;
 
-        glm::mat4 mvp = projection_mat * translate_mat;
+        glm::mat4 mvp = projection_mat * cam_translate_mat * model_mat;
 
         glClearColor(0.f, 0.0f, 0.f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glEnable(GL_DEPTH_TEST);
+
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
 
         glUseProgram(shader_program);
         glUniformMatrix4fv(glGetUniformLocation(shader_program, "mvp"), 1, GL_FALSE, glm::value_ptr(mvp));
@@ -208,7 +182,12 @@ int main() {
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+
+        start_time = end_time;
+        end_time = std::chrono::high_resolution_clock::now();
     }
+
+    std::puts("a");
 
     glfwTerminate();
     return 0;
