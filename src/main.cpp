@@ -7,7 +7,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <array>
 #include <vector>
 #include <chrono>
 
@@ -30,6 +29,7 @@
 #include <glm/ext/vector_float3.hpp>
 
 #include "shaders.hpp"
+#include "sphere.hpp"
 
 std::string get_exe_path() {
 
@@ -109,11 +109,14 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    /*
     std::array<float, 3*3> vertices = {
         -0.5f, -0.5f, 0.f,
         0.5f, -0.5f, 0.f,
         0.0f,  0.5f, 0.f
-    };
+    };*/
+
+    std::vector<float> vertices = Sphere::sphere_vertices();
 
     unsigned vao;
     glGenVertexArrays(1, &vao);
@@ -129,7 +132,9 @@ int main() {
     glEnableVertexAttribArray(0);
 
     glm::vec3 cam_pos = {0.f, 0.f, 0.f};
+    float cam_angle = 0.f;
     float cam_move_speed = 1.f;
+    float cam_rot_speed = 3.f;
 
     //std::chrono::microseconds start_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch());
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -145,15 +150,14 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cam_pos.x += cam_move_speed*delta_time;
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cam_pos.x -= cam_move_speed*delta_time;
 
+        if (glfwGetKey(window, GLFW_KEY_LEFT)) cam_angle -= cam_rot_speed*delta_time;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT)) cam_angle += cam_rot_speed*delta_time;
+
         glm::mat4 projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 1000.f);
         glm::mat4 cam_translate_mat = glm::mat4(1.f);
         cam_translate_mat = glm::translate(cam_translate_mat, cam_pos);
-
-        glm::mat4 view_mat = glm::lookAt(
-                cam_pos,
-                glm::vec3(0.f, 0.f, -1000.f),
-                glm::vec3(0.f, 1.f, 0.f)
-                );
+        glm::mat4 cam_rotate_mat = glm::mat4(1.f);
+        cam_rotate_mat = glm::rotate(cam_rotate_mat, cam_angle, glm::vec3(0.f, 1.f, 0.f));
 
         glm::mat4 translate_mat = glm::mat4(1.f);
         translate_mat = glm::translate(translate_mat, glm::vec3(0.f, 0.f, -1.f));
@@ -162,9 +166,10 @@ int main() {
         glm::mat4 scale_mat = glm::mat4(1.f);
         scale_mat = glm::scale(scale_mat, glm::vec3(2.f, 1.f, 1.f));
 
-        glm::mat4 model_mat = translate_mat*rotate_mat*scale_mat;
+        //glm::mat4 model_mat = translate_mat*rotate_mat*scale_mat;
 
-        glm::mat4 mvp = projection_mat * cam_translate_mat * model_mat;
+        //glm::mat4 mvp = projection_mat * cam_translate_mat * model_mat;
+        glm::mat4 mvp = projection_mat * cam_rotate_mat * cam_translate_mat;
 
         glClearColor(0.f, 0.0f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -178,7 +183,7 @@ int main() {
         glUniformMatrix4fv(glGetUniformLocation(shader_program, "mvp"), 1, GL_FALSE, glm::value_ptr(mvp));
 
         glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawArrays(GL_TRIANGLES, 0, vertices.size());
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -186,8 +191,6 @@ int main() {
         start_time = end_time;
         end_time = std::chrono::high_resolution_clock::now();
     }
-
-    std::puts("a");
 
     glfwTerminate();
     return 0;
