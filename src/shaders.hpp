@@ -7,7 +7,7 @@
 
 namespace Shaders {
 
-    unsigned create_shader(std::string path, GLenum type);
-    unsigned link_shaders(unsigned *shaders, std::size_t n_shaders, std::string shader_name); 
+    GLuint create_shader(std::string path, GLenum type);
+    GLuint link_shaders(GLuint *shaders, std::size_t n_shaders, std::string shader_name); 
 
 }

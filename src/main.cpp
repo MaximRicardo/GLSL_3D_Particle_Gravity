@@ -100,13 +100,13 @@ int main() {
     gladLoadGL();
 
     //Load in the shaders
-    unsigned shader_program;
+    GLuint shader_program;
     try {
-        unsigned vertex_shader = Shaders::create_shader(exe_folder + "../src/shaders/vertex.vert", GL_VERTEX_SHADER);
+        GLuint vertex_shader = Shaders::create_shader(exe_folder + "../src/shaders/vertex.vert", GL_VERTEX_SHADER);
 
-        unsigned fragment_shader = Shaders::create_shader(exe_folder + "../src/shaders/fragment.frag", GL_FRAGMENT_SHADER);
+        GLuint fragment_shader = Shaders::create_shader(exe_folder + "../src/shaders/fragment.frag", GL_FRAGMENT_SHADER);
 
-        std::vector<unsigned> shaders = {vertex_shader, fragment_shader};
+        std::vector<GLuint> shaders = {vertex_shader, fragment_shader};
         shader_program = Shaders::link_shaders(shaders.data(), shaders.size(), "shader_program");
 
         glDeleteShader(vertex_shader);
@@ -133,10 +133,17 @@ int main() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    std::vector<glm::mat4> particle_mvps(2);
+    std::vector<glm::vec4> particle_positions(2);
+    particle_positions[0] = glm::vec4(0.f, 0.f, -3.f, 1.f);
+    particle_positions[1] = glm::vec4(3.f, 0.f, -3.f, 1.f);
 
-    GLuint particle_mvps_ssbo;
-    glGenBuffers(1, &particle_mvps_ssbo);
+    GLuint particle_positions_ssbo;
+    glGenBuffers(1, &particle_positions_ssbo);
+    
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_positions_ssbo);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, particle_positions.size()*sizeof(particle_positions[0]), glm::value_ptr(particle_positions[0]), GL_DYNAMIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_positions_ssbo);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     Camera::Camera camera;
     camera.MovementSpeed = 1.f;
@@ -176,25 +183,6 @@ int main() {
         glm::mat4 cam_projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 1000.f);
         glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();//* cam_look_at_mat * cam_translate_mat;
 
-        {
-            glm::mat4 translate_mat = glm::mat4(1.f);
-            translate_mat = glm::translate(translate_mat, glm::vec3(0.f, 0.f, -3.f));
-
-            particle_mvps[0] = cam_mat * translate_mat;
-        }
-
-        {
-            glm::mat4 translate_mat = glm::mat4(1.f);
-            translate_mat = glm::translate(translate_mat, glm::vec3(3.f, 0.f, -3.f));
-
-            particle_mvps[1] = cam_mat * translate_mat;
-        }
-    
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_mvps_ssbo);
-        glBufferData(GL_SHADER_STORAGE_BUFFER, particle_mvps.size()*sizeof(particle_mvps[0]), glm::value_ptr(particle_mvps[0]), GL_DYNAMIC_DRAW);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_mvps_ssbo);
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-
         glClearColor(0.f, 0.0f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -205,10 +193,12 @@ int main() {
 
         glUseProgram(shader_program);
 
-        GLint ssbo_binding = 1;
+        glUniformMatrix4fv(glGetUniformLocation(shader_program, "vp_mat"), 1, GL_FALSE, glm::value_ptr(cam_mat));
+
+        GLint ssbo_binding = 0;
         GLint block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "mvps");
-        glShaderStorageBlockBinding(shader_program, block_index, particle_mvps_ssbo);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, ssbo_binding, particle_mvps_ssbo);
+        glShaderStorageBlockBinding(shader_program, block_index, particle_positions_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, ssbo_binding, particle_positions_ssbo);
 
         glBindVertexArray(vao);
         glDrawArraysInstanced(GL_TRIANGLES, 0, vertices.size(), 2);

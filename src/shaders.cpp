@@ -9,7 +9,7 @@
 
 namespace Shaders {
 
-    unsigned create_shader(std::string shader_path, GLenum type) {
+    GLuint create_shader(std::string shader_path, GLenum type) {
 
         std::ifstream shader_file(shader_path);
         if (shader_file.fail()) {
@@ -44,7 +44,7 @@ namespace Shaders {
 
     }
 
-    unsigned link_shaders(unsigned* shaders, std::size_t n_shaders, std::string shader_program_name) {
+    GLuint link_shaders(GLuint *shaders, std::size_t n_shaders, std::string shader_program_name) {
 
         unsigned shader_program = glCreateProgram();
 
