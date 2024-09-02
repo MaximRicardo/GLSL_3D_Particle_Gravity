@@ -1,0 +1,77 @@
+#version 430 core
+
+layout (std430, binding=0) buffer particle_positions_buffer {
+    vec4 particle_positions[];
+};
+
+layout (std430, binding=1) buffer particle_accelerations_buffer {
+    vec4 particle_accelerations[];
+};
+
+layout (std430, binding=2) buffer particle_velocities_buffer {
+    vec4 particle_velocities[];
+};
+
+uniform float particle_mass;
+uniform float particle_radius;
+
+uniform float G;
+
+uniform float delta_time;
+
+uniform int n_particles;
+
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+void gravity(int thread_idx, int other_idx) {
+
+    float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz);
+    if (dist == 0) return;
+
+    float f = particle_mass*G/pow(dist, 2.0);    
+    vec3 dir = normalize(particle_positions[other_idx].xyz - particle_positions[thread_idx].xyz);
+
+    particle_accelerations[thread_idx].xyz += dir*f;
+
+}
+
+void collision(int thread_idx, int other_idx) {
+
+    float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz);
+    if (dist >= particle_radius*2.0) return;
+
+    float move_back_amount = particle_radius*2.0 - dist;
+    vec3 move_back_dir = particle_positions[thread_idx].xyz-particle_positions[other_idx].xyz;
+    if (move_back_dir.length() == 0.0) return;
+    move_back_dir = normalize(move_back_dir);
+
+    particle_positions[thread_idx].xyz += move_back_dir*move_back_amount;
+
+    vec3 n = -move_back_dir;
+    float this_d = dot(particle_velocities[thread_idx].xyz, n);
+    if (this_d > 0.0) {
+        particle_velocities[thread_idx].xyz -= n*this_d;
+
+        particle_velocities[other_idx].xyz += n*this_d/1.1;
+    }
+
+}
+
+void main() {
+
+    int thread_idx = int(gl_GlobalInvocationID.x);
+    if (thread_idx >= n_particles) return;
+
+    particle_accelerations[thread_idx] = vec4(0.0, 0.0, 0.0, 1.0);
+
+    for (int i = 0; i < n_particles; i++) {
+        if (i == thread_idx) continue;
+        gravity(thread_idx, i);
+        collision(thread_idx, i);
+    }
+
+    //Apply acceleration and velocity
+    particle_velocities[thread_idx].xyz += particle_accelerations[thread_idx].xyz*delta_time;
+    particle_positions[thread_idx].xyz += particle_velocities[thread_idx].xyz*delta_time;
+    
+}

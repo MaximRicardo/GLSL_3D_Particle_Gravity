@@ -57,7 +57,7 @@ namespace Shaders {
         //Error checking
         int success;
         char info_log[512];
-        glGetProgramiv(shader_program, GL_COMPILE_STATUS, &success);
+        glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
         if (!success) {
             glGetProgramInfoLog(shader_program, 512, NULL, info_log);
             std::ostringstream err_msg_stream;

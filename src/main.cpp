@@ -5,6 +5,7 @@
 #include <exception>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -64,6 +65,53 @@ std::string get_exe_path() {
 
 }
 
+void APIENTRY glDebugOutput(GLenum source, 
+                            GLenum type, 
+                            unsigned int id, 
+                            GLenum severity, 
+                            GLsizei length, 
+                            const char *message, 
+                            const void *userParam)
+{
+    // ignore non-significant error/warning codes
+    if(id == 131169 || id == 131185 || id == 131218 || id == 131204) return; 
+
+    std::cout << "---------------" << std::endl;
+    std::cout << "Debug message (" << id << "): " <<  message << std::endl;
+
+    switch (source)
+    {
+        case GL_DEBUG_SOURCE_API:             std::cout << "Source: API"; break;
+        case GL_DEBUG_SOURCE_WINDOW_SYSTEM:   std::cout << "Source: Window System"; break;
+        case GL_DEBUG_SOURCE_SHADER_COMPILER: std::cout << "Source: Shader Compiler"; break;
+        case GL_DEBUG_SOURCE_THIRD_PARTY:     std::cout << "Source: Third Party"; break;
+        case GL_DEBUG_SOURCE_APPLICATION:     std::cout << "Source: Application"; break;
+        case GL_DEBUG_SOURCE_OTHER:           std::cout << "Source: Other"; break;
+    } std::cout << std::endl;
+
+    switch (type)
+    {
+        case GL_DEBUG_TYPE_ERROR:               std::cout << "Type: Error"; break;
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: std::cout << "Type: Deprecated Behaviour"; break;
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  std::cout << "Type: Undefined Behaviour"; break; 
+        case GL_DEBUG_TYPE_PORTABILITY:         std::cout << "Type: Portability"; break;
+        case GL_DEBUG_TYPE_PERFORMANCE:         std::cout << "Type: Performance"; break;
+        case GL_DEBUG_TYPE_MARKER:              std::cout << "Type: Marker"; break;
+        case GL_DEBUG_TYPE_PUSH_GROUP:          std::cout << "Type: Push Group"; break;
+        case GL_DEBUG_TYPE_POP_GROUP:           std::cout << "Type: Pop Group"; break;
+        case GL_DEBUG_TYPE_OTHER:               std::cout << "Type: Other"; break;
+    } std::cout << std::endl;
+    
+    switch (severity)
+    {
+        case GL_DEBUG_SEVERITY_HIGH:         std::cout << "Severity: high"; break;
+        case GL_DEBUG_SEVERITY_MEDIUM:       std::cout << "Severity: medium"; break;
+        case GL_DEBUG_SEVERITY_LOW:          std::cout << "Severity: low"; break;
+        case GL_DEBUG_SEVERITY_NOTIFICATION: std::cout << "Severity: notification"; break;
+    } std::cout << std::endl;
+    std::cout << std::endl;
+}
+
 glm::vec2 get_cursor_pos(GLFWwindow *window) {
     double x, y;
     glfwGetCursorPos(window, &x, &y);
@@ -82,6 +130,7 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
 
     gladLoadGL();
 
@@ -98,6 +147,17 @@ int main() {
     glfwMakeContextCurrent(window);
 
     gladLoadGL();
+
+    {
+        int flags; glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+        if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {
+            // initialize debug output
+            glEnable(GL_DEBUG_OUTPUT);
+            glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            glDebugMessageCallback(glDebugOutput, nullptr);
+            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+        }
+    }
 
     //Load in the shaders
     GLuint shader_program;
@@ -118,7 +178,23 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    std::vector<float> vertices = Sphere::sphere_vertices(16, 16, 0.5f);
+    //Load in the physics compute shader
+    GLuint physics_shader_program;
+    try {
+        GLuint compute_shader = Shaders::create_shader(exe_folder + "../src/shaders/physics.comp", GL_COMPUTE_SHADER);
+
+        std::vector<GLuint> shaders = {compute_shader};
+        physics_shader_program = Shaders::link_shaders(shaders.data(), shaders.size(), "compute_shader_program");
+
+        glDeleteShader(compute_shader);
+    }
+    catch (std::exception &e) {
+        std::fprintf(stderr, "%s", e.what());
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+    
+    std::vector<float> vertices = Sphere::sphere_vertices(16, 16, 1.f);
 
     unsigned vao;
     glGenVertexArrays(1, &vao);
@@ -135,15 +211,16 @@ int main() {
 
     //w component is ignored
     std::vector<glm::vec4> particle_positions(2);
-    particle_positions[0] = glm::vec4(0.f, 0.f, -3.f, 0.f);
-    particle_positions[1] = glm::vec4(3.f, 0.f, -3.f, 0.f);
+    particle_positions[0] = glm::vec4(-5.f, 0.f, -3.f, 0.f);
+    particle_positions[1] = glm::vec4(5.f, 0.f, -3.f, 0.f);
 
     //w component is ignored
     std::vector<glm::vec4> particle_velocities(2, glm::vec4(0.f, 0.f, 0.f, 0.f));
+    particle_velocities[0].z = 0.2f;
+    particle_velocities[1].z = -0.2f;
 
     //w component is ignored
     std::vector<glm::vec4> particle_accelerations(2, glm::vec4(0.f, 0.f, 0.f, 0.f));
-    particle_accelerations[0].x = 10.f;
 
     //SSBOs
 
@@ -172,6 +249,26 @@ int main() {
     camera.MovementSpeed = 1.f;
     camera.MouseSensitivity = 0.05f;
     camera.Zoom = 1.f;
+
+    /*
+    {
+        GLint block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
+        glShaderStorageBlockBinding(physics_shader_program, block_index, particle_positions_ssbo);
+        
+        block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
+        glShaderStorageBlockBinding(physics_shader_program, block_index, particle_accelerations_ssbo);
+        
+        block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_velocities_buffer");
+        glShaderStorageBlockBinding(physics_shader_program, block_index, particle_velocities_ssbo);
+
+
+        block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
+        glShaderStorageBlockBinding(shader_program, block_index, particle_positions_ssbo);
+        
+        block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
+        glShaderStorageBlockBinding(shader_program, block_index, particle_accelerations_ssbo);
+    }
+    */
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -214,27 +311,81 @@ int main() {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
 
+        std::size_t n_particles = 2;
+
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particle_positions_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_accelerations_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, particle_velocities_ssbo);
+
+        //physics
+
+        //Compute Shader
+        glUseProgram(physics_shader_program);
+
+        {
+            glUniform1f(glGetUniformLocation(physics_shader_program, "G"), 1.f);
+            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), 1.f);
+            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_radius"), 1.f);
+            glUniform1f(glGetUniformLocation(physics_shader_program, "delta_time"), delta_time);
+            glUniform1i(glGetUniformLocation(physics_shader_program, "n_particles"), 2);
+
+            /*
+            GLint position_ssbo_binding = 0;
+            //GLint block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
+            //glShaderStorageBlockBinding(physics_shader_program, block_index, particle_positions_ssbo);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, particle_positions_ssbo);
+            
+            GLint velocity_ssbo_binding = 1;
+            //block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_velocities_buffer");
+            //glShaderStorageBlockBinding(physics_shader_program, block_index, particle_velocities_ssbo);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, velocity_ssbo_binding, particle_velocities_ssbo);
+
+            GLint acceleration_ssbo_binding = 2;
+            //block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
+            //glShaderStorageBlockBinding(physics_shader_program, block_index, particle_accelerations_ssbo);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, particle_accelerations_ssbo);*/
+
+            glDispatchCompute(n_particles, 1, 1);
+            //glCheckError();
+            //assert(glGetError() == GL_NO_ERROR);
+
+            glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+            /*
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, 0);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, velocity_ssbo_binding, 0);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, 0);*/
+
+            glUseProgram(0);
+        }
+
+        //Rendering everything
+
         glUseProgram(shader_program);
 
-        glUniformMatrix4fv(glGetUniformLocation(shader_program, "vp_mat"), 1, GL_FALSE, glm::value_ptr(cam_mat));
+        {
+            glUniformMatrix4fv(glGetUniformLocation(shader_program, "vp_mat"), 1, GL_FALSE, glm::value_ptr(cam_mat)); //View and projection matrix
 
-        GLint position_ssbo_binding = 0;
-        GLint block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
-        glShaderStorageBlockBinding(shader_program, block_index, particle_positions_ssbo);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, particle_positions_ssbo);
+            //GLint position_ssbo_binding = 0;
+            //GLint block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
+            //glShaderStorageBlockBinding(shader_program, block_index, particle_positions_ssbo);
+            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, particle_positions_ssbo);
 
-        GLint acceleration_ssbo_binding = 1;
-        block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
-        glShaderStorageBlockBinding(shader_program, block_index, particle_accelerations_ssbo);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, particle_accelerations_ssbo);
+            //GLint acceleration_ssbo_binding = 1;
+            //block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
+            //glShaderStorageBlockBinding(shader_program, block_index, particle_accelerations_ssbo);
+            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, particle_accelerations_ssbo);
+            
+            glBindVertexArray(vao);
+            glDrawArraysInstanced(GL_TRIANGLES, 0, vertices.size(), 2);
 
-        glBindVertexArray(vao);
-        glDrawArraysInstanced(GL_TRIANGLES, 0, vertices.size(), 2);
+            glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, 0);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, 0);
-        glUseProgram(0);
-
+            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, 0);
+            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, 0);
+            glUseProgram(0);
+        }
+        
         glfwSwapBuffers(window);
         glfwPollEvents();
 
