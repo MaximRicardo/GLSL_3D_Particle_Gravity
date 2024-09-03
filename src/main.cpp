@@ -215,8 +215,10 @@ int main() {
         glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(float), vertices.data(), GL_STATIC_DRAW);
     }
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
 
     std::size_t n_base_colors = 3;
     std::vector<glm::vec4> base_colors(n_base_colors);
@@ -292,29 +294,17 @@ int main() {
     camera.MouseSensitivity = 0.05f;
     camera.Zoom = 1.f;
 
-    /*
-    {
-        GLint block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
-        glShaderStorageBlockBinding(physics_shader_program, block_index, particle_positions_ssbo);
-        
-        block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
-        glShaderStorageBlockBinding(physics_shader_program, block_index, particle_accelerations_ssbo);
-        
-        block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_velocities_buffer");
-        glShaderStorageBlockBinding(physics_shader_program, block_index, particle_velocities_ssbo);
-
-
-        block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
-        glShaderStorageBlockBinding(shader_program, block_index, particle_positions_ssbo);
-        
-        block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
-        glShaderStorageBlockBinding(shader_program, block_index, particle_accelerations_ssbo);
-    }
-    */
-
     GLuint hdr_fbo;
     glGenFramebuffers(1, &hdr_fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, hdr_fbo);
+
+    GLuint hdr_rbo;
+    glGenRenderbuffers(1, &hdr_rbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, hdr_rbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, screen_width, screen_height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, hdr_rbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
     std::array<GLuint, 2> color_buffers;
     glGenTextures(2, color_buffers.data());
     for (unsigned i = 0; i < 2; i++) {
@@ -385,15 +375,12 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
             camera.Position.y += camera.MovementSpeed*delta_time;
 
-        glm::mat4 cam_projection_mat = glm::mat4(1.f);
-        cam_projection_mat = glm::project(glm::vec3(camera.Position), cam_projection_mat, );
+        camera.ProcessMouseMovement(cursor_delta.x, -cursor_delta.y);
 
+        glm::mat4 cam_projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 10000.f);
         glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();//* cam_look_at_mat * cam_translate_mat;
 
-        glClearColor(0.f, 0.f, 0.f, 1.f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, hdr_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, color_buffers[0]);
         glClearColor(0.f, 0.f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -442,16 +429,21 @@ int main() {
         }
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClearColor(0.f, 0.f, 0.f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
 
         //Render the screen textures
         glUseProgram(texture_shader_program);
         {
             glBindVertexArray(screen_vao);
-            glDisable(GL_DEPTH_TEST);
+
             glBindTexture(GL_TEXTURE_2D, color_buffers[0]);
-            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
             glBindTexture(GL_TEXTURE_2D, 0);
-            glEnable(GL_DEPTH_TEST);
 
             glUseProgram(0);
         }
