@@ -4,6 +4,7 @@
 #include <cstring>
 #include <exception>
 #include <glm/ext/matrix_transform.hpp>
+#include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
 #include <sstream>
 #include <stdexcept>
@@ -33,6 +34,7 @@
 #include "shaders.hpp"
 #include "sphere.hpp"
 #include "camera.hpp"
+#include "galaxy.hpp"
 
 std::string get_exe_path() {
 
@@ -59,7 +61,7 @@ std::string get_exe_path() {
             return std::string(buff);
         }
         else {
-            exit(1);  //Idk how tf to deal with this on windows
+            exit(EXIT_FAILURE); //Idk how tf to deal with this on windows
         }
     #endif
 
@@ -95,7 +97,7 @@ int main() {
     //Create a glfw window
     constexpr unsigned screen_width = 1280;
     constexpr unsigned screen_height = 720;
-    GLFWwindow* window = glfwCreateWindow(screen_width, screen_height, "Hello Triangle", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(screen_width, screen_height, "Gravity Simulator", NULL, NULL);
     if (window == NULL) {
         fprintf(stderr, "Failed to create GLFW window\n");
         glfwTerminate();
@@ -168,22 +170,42 @@ int main() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
+    std::size_t n_base_colors = 3;
+    std::vector<glm::vec4> base_colors(n_base_colors);
+    base_colors[0] = glm::vec4(1.f, 1.f, 1.f, 1.f);         //White
+    base_colors[1] = glm::vec4(0.f, 0.47f, 0.95f, 1.f);     //Blue
+    base_colors[2] = glm::vec4(0.9f, 0.16f, 0.22f, 1.f);    //Red
+
+    for (std::size_t i = 0; i < n_base_colors; i++) base_colors[i] = glm::vec4(glm::normalize(glm::vec3(base_colors[i])), base_colors[i].w);
+
     std::size_t n_particles = 10000;
 
     //w component is ignored
-    std::vector<glm::vec4> particle_positions(n_particles);
+    std::vector<glm::vec4> particle_positions = Galaxy::generate_galaxy(n_particles, 100.f);
 
     //w component is ignored
     std::vector<glm::vec4> particle_velocities(n_particles, glm::vec4(0.f, 0.f, 0.f, 0.f));
 
-    //w component is ignored
-    std::vector<glm::vec4> particle_accelerations(n_particles, glm::vec4(0.f, 0.f, 0.f, 0.f));
+    //y, z and w components are ignored, std430 rounds everything up to vec4 sizes
+    std::vector<glm::vec4> particle_lighting(n_particles);
+
+    std::vector<glm::vec4> particle_base_colors(n_particles);
 
     for (std::size_t i = 0; i < n_particles; i++) {
 
-        particle_positions[i].x = random_float(-100.f, 100.f);
-        particle_positions[i].y = random_float(-100.f, 100.f);
-        particle_positions[i].z = random_float(-100.f, 100.f);
+        //Starting velocities
+
+        float dist = glm::distance(glm::vec3(particle_positions[i]), glm::vec3(0.f, 0.f, 0.f));
+        glm::vec3 up(0.f, 1.f, 0.f);
+        glm::vec3 dir = glm::cross(up, glm::normalize(glm::vec3(particle_positions[i])));
+
+        float mult = 0.1f;
+        particle_velocities[i] = glm::vec4(dir*mult*dist, 1.f);
+
+        //Base colors
+
+        unsigned idx = std::round(random_float(0.f, n_base_colors-1));
+        particle_base_colors[i] = base_colors[idx];
 
     }
 
@@ -203,14 +225,21 @@ int main() {
     glBufferData(GL_SHADER_STORAGE_BUFFER, particle_velocities.size()*sizeof(particle_velocities[0]), glm::value_ptr(particle_velocities[0]), GL_DYNAMIC_DRAW);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-    GLuint particle_accelerations_ssbo;
-    glGenBuffers(1, &particle_accelerations_ssbo);
+    GLuint particle_lighting_ssbo;
+    glGenBuffers(1, &particle_lighting_ssbo);
 
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_accelerations_ssbo);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, particle_accelerations.size()*sizeof(particle_accelerations[0]), glm::value_ptr(particle_accelerations[0]), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_lighting_ssbo);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, particle_lighting.size()*sizeof(particle_lighting[0]), particle_lighting.data(), GL_DYNAMIC_DRAW);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-    Camera::Camera camera;
+    GLuint particle_base_colors_ssbo;
+    glGenBuffers(1, &particle_base_colors_ssbo);
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_base_colors_ssbo);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, particle_base_colors.size()*sizeof(particle_base_colors[0]), glm::value_ptr(particle_base_colors[0]), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    Camera::Camera camera(glm::vec3(0.f, 0.f, 100.f));
     camera.MovementSpeed = 25.f;
     camera.MouseSensitivity = 0.05f;
     camera.Zoom = 1.f;
@@ -250,7 +279,7 @@ int main() {
 
         glm::vec2 cursor_delta = end_cursor_pos - start_cursor_pos;
 
-        std::printf("fps = %f\n", fps);
+        //std::printf("fps = %f\n", fps);
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
             camera.ProcessKeyboard(Camera::Camera_Movement::FORWARD, delta_time);
@@ -267,7 +296,7 @@ int main() {
 
         camera.ProcessMouseMovement(cursor_delta.x, -cursor_delta.y);
 
-        glm::mat4 cam_projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 1000.f);
+        glm::mat4 cam_projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 10000.f);
         glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();//* cam_look_at_mat * cam_translate_mat;
 
         glClearColor(0.f, 0.0f, 0.f, 1.f);
@@ -279,8 +308,9 @@ int main() {
         glCullFace(GL_BACK);
 
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particle_positions_ssbo);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_accelerations_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_lighting_ssbo);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, particle_velocities_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, particle_base_colors_ssbo);
 
         //physics
 
@@ -290,6 +320,7 @@ int main() {
             glUniform1f(glGetUniformLocation(physics_shader_program, "G"), 1.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), 10.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "particle_radius"), 1.f);
+            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_light_strength"), 1.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "delta_time"), delta_time);
             glUniform1i(glGetUniformLocation(physics_shader_program, "n_particles"), n_particles);
 
