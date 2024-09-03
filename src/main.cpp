@@ -1,8 +1,10 @@
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <glm/ext/matrix_projection.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
 #include <glm/trigonometric.hpp>
@@ -154,18 +156,64 @@ int main() {
         glfwTerminate();
         return EXIT_FAILURE;
     }
-    
-    std::vector<float> vertices = Sphere::sphere_vertices(16, 16, 1.f);
 
-    unsigned vao;
+    //Load in the texture rendering shader
+    GLuint texture_shader_program;
+    try {
+        GLuint vertex_shader = Shaders::create_shader(exe_folder + "../src/shaders/text_vertex.vert", GL_VERTEX_SHADER);
+        GLuint fragment_shader = Shaders::create_shader(exe_folder + "../src/shaders/text_fragment.frag", GL_FRAGMENT_SHADER);
+
+        std::vector<GLuint> shaders = {vertex_shader, fragment_shader};
+        texture_shader_program = Shaders::link_shaders(shaders.data(), shaders.size(), "texture_shader_program");
+
+        glDeleteShader(vertex_shader);
+        glDeleteShader(fragment_shader);
+    }
+    catch (std::exception &e) {
+        std::fprintf(stderr, "%s", e.what());
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+    
+    std::vector<float> sphere_vertices = Sphere::sphere_vertices(16, 16, 1.f);
+
+    GLuint vao;
     glGenVertexArrays(1, &vao);
 
-    unsigned vbo;
+    GLuint vbo;
     glGenBuffers(1, &vbo);
 
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(float), vertices.data(), GL_STATIC_DRAW);
+    {
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, sphere_vertices.size()*sizeof(float), sphere_vertices.data(), GL_STATIC_DRAW);
+    }
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+
+    GLuint screen_vao;
+    glGenVertexArrays(1, &screen_vao);
+
+    GLuint screen_vbo;
+    glGenBuffers(1, &screen_vbo);
+
+    {
+        std::array<float, 24> vertices = {  // vertex attributes for a quad that fills the entire screen in Normalized Device Coordinates.
+            // positions   // texCoords
+            -1.0f,  1.0f,  0.0f, 1.0f,
+            -1.0f, -1.0f,  0.0f, 0.0f,
+             1.0f, -1.0f,  1.0f, 0.0f,
+
+            -1.0f,  1.0f,  0.0f, 1.0f,
+             1.0f, -1.0f,  1.0f, 0.0f,
+             1.0f,  1.0f,  1.0f, 1.0f
+        };
+
+        glBindVertexArray(screen_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, screen_vbo);
+        glBufferData(GL_ARRAY_BUFFER, vertices.size()*sizeof(float), vertices.data(), GL_STATIC_DRAW);
+    }
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
@@ -264,6 +312,49 @@ int main() {
     }
     */
 
+    GLuint hdr_fbo;
+    glGenFramebuffers(1, &hdr_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, hdr_fbo);
+    std::array<GLuint, 2> color_buffers;
+    glGenTextures(2, color_buffers.data());
+    for (unsigned i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, color_buffers[i]);
+        glTexImage2D(
+                GL_TEXTURE_2D, 0, GL_RGBA16F, screen_width, screen_height, 0, GL_RGBA, GL_FLOAT, NULL
+                );
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        //Attach the texture to the frame buffer
+        glFramebufferTexture2D(
+                GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0+i, GL_TEXTURE_2D, color_buffers[i], 0
+                );
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) std::fprintf(stderr, "Error: hdr_fbo not ready!\n");
+    }
+
+    std::array<GLuint, 2> ping_pong_fbo;
+    std::array<GLuint, 2> ping_pong_buffer;
+    glGenFramebuffers(2, ping_pong_fbo.data());
+    glGenTextures(2, ping_pong_buffer.data());
+    for (unsigned i = 0; i < 2; i++) {
+        glBindFramebuffer(GL_FRAMEBUFFER, ping_pong_fbo[i]);
+        glBindTexture(GL_TEXTURE_2D, ping_pong_buffer[i]);
+        glTexImage2D(
+                GL_TEXTURE_2D, 0, GL_RGBA16F, screen_width, screen_height, 0, GL_RGBA, GL_FLOAT, NULL
+                );
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glFramebufferTexture2D(
+                GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ping_pong_buffer[i], 0
+                );
+    }
+
+    std::array<GLuint, 2> attachments = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, attachments.data());
+    
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -294,12 +385,16 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
             camera.Position.y += camera.MovementSpeed*delta_time;
 
-        camera.ProcessMouseMovement(cursor_delta.x, -cursor_delta.y);
+        glm::mat4 cam_projection_mat = glm::mat4(1.f);
+        cam_projection_mat = glm::project(glm::vec3(camera.Position), cam_projection_mat, );
 
-        glm::mat4 cam_projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 10000.f);
         glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();//* cam_look_at_mat * cam_translate_mat;
 
-        glClearColor(0.f, 0.0f, 0.f, 1.f);
+        glClearColor(0.f, 0.f, 0.f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, hdr_fbo);
+        glClearColor(0.f, 0.f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glEnable(GL_DEPTH_TEST);
@@ -339,9 +434,24 @@ int main() {
             glUniformMatrix4fv(glGetUniformLocation(shader_program, "vp_mat"), 1, GL_FALSE, glm::value_ptr(cam_mat)); //View and projection matrix
             
             glBindVertexArray(vao);
-            glDrawArraysInstanced(GL_TRIANGLES, 0, vertices.size(), n_particles);
+            glDrawArraysInstanced(GL_TRIANGLES, 0, sphere_vertices.size(), n_particles);
 
             glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+            glUseProgram(0);
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        //Render the screen textures
+        glUseProgram(texture_shader_program);
+        {
+            glBindVertexArray(screen_vao);
+            glDisable(GL_DEPTH_TEST);
+            glBindTexture(GL_TEXTURE_2D, color_buffers[0]);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glEnable(GL_DEPTH_TEST);
 
             glUseProgram(0);
         }
