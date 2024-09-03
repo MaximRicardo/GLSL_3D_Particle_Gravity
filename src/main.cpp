@@ -157,14 +157,32 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    //Load in the texture rendering shader
-    GLuint texture_shader_program;
+    //Load in the final rendering shader
+    GLuint final_shader_program;
     try {
-        GLuint vertex_shader = Shaders::create_shader(exe_folder + "../src/shaders/text_vertex.vert", GL_VERTEX_SHADER);
-        GLuint fragment_shader = Shaders::create_shader(exe_folder + "../src/shaders/text_fragment.frag", GL_FRAGMENT_SHADER);
+        GLuint vertex_shader = Shaders::create_shader(exe_folder + "../src/shaders/final.vert", GL_VERTEX_SHADER);
+        GLuint fragment_shader = Shaders::create_shader(exe_folder + "../src/shaders/final.frag", GL_FRAGMENT_SHADER);
 
         std::vector<GLuint> shaders = {vertex_shader, fragment_shader};
-        texture_shader_program = Shaders::link_shaders(shaders.data(), shaders.size(), "texture_shader_program");
+        final_shader_program = Shaders::link_shaders(shaders.data(), shaders.size(), "final_shader_program");
+
+        glDeleteShader(vertex_shader);
+        glDeleteShader(fragment_shader);
+    }
+    catch (std::exception &e) {
+        std::fprintf(stderr, "%s", e.what());
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+
+    //Load in the blurring shader
+    GLuint blur_shader_program;
+    try {
+        GLuint vertex_shader = Shaders::create_shader(exe_folder + "../src/shaders/blur.vert", GL_VERTEX_SHADER);
+        GLuint fragment_shader = Shaders::create_shader(exe_folder + "../src/shaders/blur.frag", GL_FRAGMENT_SHADER);
+
+        std::vector<GLuint> shaders = {vertex_shader, fragment_shader};
+        blur_shader_program = Shaders::link_shaders(shaders.data(), shaders.size(), "blur_shader_program");
 
         glDeleteShader(vertex_shader);
         glDeleteShader(fragment_shader);
@@ -290,7 +308,7 @@ int main() {
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     Camera::Camera camera(glm::vec3(0.f, 0.f, 100.f));
-    camera.MovementSpeed = 25.f;
+    camera.MovementSpeed = 100.f;
     camera.MouseSensitivity = 0.05f;
     camera.Zoom = 1.f;
 
@@ -320,16 +338,23 @@ int main() {
         glFramebufferTexture2D(
                 GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0+i, GL_TEXTURE_2D, color_buffers[i], 0
                 );
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) std::fprintf(stderr, "Error: hdr_fbo not ready!\n");
     }
 
+    {
+        std::array<GLuint, 2> attachments = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+        glDrawBuffers(2, attachments.data());
+    }
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) std::fprintf(stderr, "Error: hdr_fbo not ready!\n");
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
     std::array<GLuint, 2> ping_pong_fbo;
-    std::array<GLuint, 2> ping_pong_buffer;
+    std::array<GLuint, 2> ping_pong_color_buffers;
     glGenFramebuffers(2, ping_pong_fbo.data());
-    glGenTextures(2, ping_pong_buffer.data());
+    glGenTextures(2, ping_pong_color_buffers.data());
     for (unsigned i = 0; i < 2; i++) {
         glBindFramebuffer(GL_FRAMEBUFFER, ping_pong_fbo[i]);
-        glBindTexture(GL_TEXTURE_2D, ping_pong_buffer[i]);
+        glBindTexture(GL_TEXTURE_2D, ping_pong_color_buffers[i]);
         glTexImage2D(
                 GL_TEXTURE_2D, 0, GL_RGBA16F, screen_width, screen_height, 0, GL_RGBA, GL_FLOAT, NULL
                 );
@@ -338,14 +363,25 @@ int main() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glFramebufferTexture2D(
-                GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ping_pong_buffer[i], 0
+                GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ping_pong_color_buffers[i], 0
                 );
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) std::fprintf(stderr, "Error: hdr_fbo not ready!\n");
     }
 
-    std::array<GLuint, 2> attachments = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-    glDrawBuffers(2, attachments.data());
-    
+    //Setup the shader uniforms
+    glUseProgram(blur_shader_program);
+    glUniform1i(glGetUniformLocation(blur_shader_program, "image"), 0);
+    glUseProgram(final_shader_program);
+    glUniform1i(glGetUniformLocation(final_shader_program, "scene"), 0);
+    glUniform1i(glGetUniformLocation(final_shader_program, "bloom_blur"), 1);
+
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    bool use_bloom = true;
+    bool r_still_down = false;
+
+    bool paused = false;
+    bool space_still_down = false;
 
     auto start_time = std::chrono::high_resolution_clock::now();
     auto end_time = start_time;
@@ -375,12 +411,24 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
             camera.Position.y += camera.MovementSpeed*delta_time;
 
+        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS && !r_still_down) {
+            use_bloom = !use_bloom;
+            r_still_down = true;
+        }
+        else if (glfwGetKey(window, GLFW_KEY_R) == GLFW_RELEASE) r_still_down = false;
+
+        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && !space_still_down) {
+            paused = !paused;
+            space_still_down = true;
+        }
+        else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_RELEASE)  space_still_down = false;
+
         camera.ProcessMouseMovement(cursor_delta.x, -cursor_delta.y);
 
         glm::mat4 cam_projection_mat = glm::perspective(glm::radians(60.f), static_cast<float>(screen_width)/static_cast<float>(screen_height), 0.01f, 10000.f);
-        glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();//* cam_look_at_mat * cam_translate_mat;
+        glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();
 
-        glBindFramebuffer(GL_FRAMEBUFFER, color_buffers[0]);
+        glBindFramebuffer(GL_FRAMEBUFFER, hdr_fbo);
         glClearColor(0.f, 0.f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -398,7 +446,7 @@ int main() {
 
         glUseProgram(physics_shader_program);
 
-        {
+        if (!paused) {
             glUniform1f(glGetUniformLocation(physics_shader_program, "G"), 1.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), 10.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "particle_radius"), 1.f);
@@ -420,6 +468,11 @@ int main() {
         {
             glUniformMatrix4fv(glGetUniformLocation(shader_program, "vp_mat"), 1, GL_FALSE, glm::value_ptr(cam_mat)); //View and projection matrix
             
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, 0);
+
             glBindVertexArray(vao);
             glDrawArraysInstanced(GL_TRIANGLES, 0, sphere_vertices.size(), n_particles);
 
@@ -428,25 +481,62 @@ int main() {
             glUseProgram(0);
         }
 
+        //Blur bright fragments via a gaussian blur
+        bool blur_horizontal = true;
+        {
+            bool first_iter = true;
+            unsigned amount = 10;
+            
+            glUseProgram(blur_shader_program);
+
+            glBindVertexArray(screen_vao);
+            for (unsigned i = 0; i < amount; i++) {
+                glBindFramebuffer(GL_FRAMEBUFFER, ping_pong_fbo[blur_horizontal]);
+                glUniform1i(glGetUniformLocation(blur_shader_program, "horizontal"), blur_horizontal);
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, first_iter ? color_buffers[1] : ping_pong_color_buffers[!blur_horizontal]);
+                glDrawArrays(GL_TRIANGLES, 0, 6);
+                blur_horizontal = !blur_horizontal;
+                first_iter = false;
+            }
+
+            glUseProgram(0);
+        }
+
+        //Render the screen textures
+        
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glClearColor(0.f, 0.f, 0.f, 1.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
 
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
 
-        //Render the screen textures
-        glUseProgram(texture_shader_program);
+        glUseProgram(final_shader_program);
         {
             glBindVertexArray(screen_vao);
 
+            glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, color_buffers[0]);
-            glDrawArrays(GL_TRIANGLES, 0, 6);
-            glBindTexture(GL_TEXTURE_2D, 0);
+            //glBindTexture(GL_TEXTURE_2D, ping_pong_color_buffers[blur_horizontal]);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, ping_pong_color_buffers[!blur_horizontal]);
 
+            glUniform1i(glGetUniformLocation(final_shader_program, "bloom"), use_bloom);
+            glUniform1f(glGetUniformLocation(final_shader_program, "exposure"), 1.f);
+
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            
             glUseProgram(0);
         }
+
+        /*
+        for (unsigned i = 0; i < 2; i++) {
+            glBindFramebuffer(GL_FRAMEBUFFER, ping_pong_fbo[i]);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glClearColor(0.f, 0.f, 0.f, 1.f);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);*/
         
         glfwSwapBuffers(window);
         glfwPollEvents();

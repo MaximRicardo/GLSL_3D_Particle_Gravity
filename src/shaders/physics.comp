@@ -71,7 +71,7 @@ void main() {
         //collision(thread_idx, i);
         gravity(thread_idx, i, acceleration);
         float dist_squared = pow(distance(particle_positions[thread_idx].xyz, particle_positions[i].xyz), 2.0);
-        if (dist_squared != 0.0) particle_lighting[thread_idx] += 1.0 / dist_squared;
+        if (dist_squared != 0.0) particle_lighting[thread_idx] += particle_light_strength / dist_squared;
     }
 
     //Apply acceleration and velocity

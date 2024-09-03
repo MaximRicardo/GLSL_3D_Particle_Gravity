@@ -19,7 +19,7 @@ namespace {
     constexpr float arm_x_mean = 200.f;
     constexpr float arm_z_mean = 100.f;
 
-    constexpr unsigned spiral = 3;
+    constexpr unsigned spiral = 6;
     constexpr unsigned arms = 2;
 
     float random_float(float a, float b) {
@@ -42,7 +42,7 @@ namespace {
     glm::vec4 spiral_point(glm::vec3 p, float offset) {
         float r = std::sqrt(p.x*p.x+p.z*p.z);
         float theta = offset;
-        theta += p.x > 0 ? std::atan(p.z/p.x) : std::atan(p.z/p.x)*PI;
+        theta += p.x > 0.f ? std::atan(p.z/p.x) : std::atan(p.z/p.x)*PI;
         theta += (r/arm_x_dist) * spiral;
         return glm::vec4(r*std::cos(theta), p.y, r*std::sin(theta), 1.f);
     }
