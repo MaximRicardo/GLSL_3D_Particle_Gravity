@@ -5,7 +5,6 @@
 #include <exception>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/trigonometric.hpp>
-#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -30,6 +29,7 @@
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float3.hpp>
 
+#include "debug.hpp"
 #include "shaders.hpp"
 #include "sphere.hpp"
 #include "camera.hpp"
@@ -65,58 +65,18 @@ std::string get_exe_path() {
 
 }
 
-void APIENTRY glDebugOutput(GLenum source, 
-                            GLenum type, 
-                            unsigned int id, 
-                            GLenum severity, 
-                            GLsizei length, 
-                            const char *message, 
-                            const void *userParam)
-{
-    // ignore non-significant error/warning codes
-    if(id == 131169 || id == 131185 || id == 131218 || id == 131204) return; 
-
-    std::cout << "---------------" << std::endl;
-    std::cout << "Debug message (" << id << "): " <<  message << std::endl;
-
-    switch (source)
-    {
-        case GL_DEBUG_SOURCE_API:             std::cout << "Source: API"; break;
-        case GL_DEBUG_SOURCE_WINDOW_SYSTEM:   std::cout << "Source: Window System"; break;
-        case GL_DEBUG_SOURCE_SHADER_COMPILER: std::cout << "Source: Shader Compiler"; break;
-        case GL_DEBUG_SOURCE_THIRD_PARTY:     std::cout << "Source: Third Party"; break;
-        case GL_DEBUG_SOURCE_APPLICATION:     std::cout << "Source: Application"; break;
-        case GL_DEBUG_SOURCE_OTHER:           std::cout << "Source: Other"; break;
-    } std::cout << std::endl;
-
-    switch (type)
-    {
-        case GL_DEBUG_TYPE_ERROR:               std::cout << "Type: Error"; break;
-        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: std::cout << "Type: Deprecated Behaviour"; break;
-        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  std::cout << "Type: Undefined Behaviour"; break; 
-        case GL_DEBUG_TYPE_PORTABILITY:         std::cout << "Type: Portability"; break;
-        case GL_DEBUG_TYPE_PERFORMANCE:         std::cout << "Type: Performance"; break;
-        case GL_DEBUG_TYPE_MARKER:              std::cout << "Type: Marker"; break;
-        case GL_DEBUG_TYPE_PUSH_GROUP:          std::cout << "Type: Push Group"; break;
-        case GL_DEBUG_TYPE_POP_GROUP:           std::cout << "Type: Pop Group"; break;
-        case GL_DEBUG_TYPE_OTHER:               std::cout << "Type: Other"; break;
-    } std::cout << std::endl;
-    
-    switch (severity)
-    {
-        case GL_DEBUG_SEVERITY_HIGH:         std::cout << "Severity: high"; break;
-        case GL_DEBUG_SEVERITY_MEDIUM:       std::cout << "Severity: medium"; break;
-        case GL_DEBUG_SEVERITY_LOW:          std::cout << "Severity: low"; break;
-        case GL_DEBUG_SEVERITY_NOTIFICATION: std::cout << "Severity: notification"; break;
-    } std::cout << std::endl;
-    std::cout << std::endl;
-}
-
 glm::vec2 get_cursor_pos(GLFWwindow *window) {
     double x, y;
     glfwGetCursorPos(window, &x, &y);
 
     return glm::vec2(x, y);
+}
+
+float random_float(float a, float b) {
+    float random = ((float) rand()) / (float) RAND_MAX;
+    float diff = b - a;
+    float r = random * diff;
+    return a + r;
 }
 
 int main() {
@@ -131,8 +91,6 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
-
-    gladLoadGL();
 
     //Create a glfw window
     constexpr unsigned screen_width = 1280;
@@ -154,7 +112,7 @@ int main() {
             // initialize debug output
             glEnable(GL_DEBUG_OUTPUT);
             glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-            glDebugMessageCallback(glDebugOutput, nullptr);
+            glDebugMessageCallback(Debug::glDebugOutput, nullptr);
             glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
         }
     }
@@ -180,6 +138,7 @@ int main() {
 
     //Load in the physics compute shader
     GLuint physics_shader_program;
+    unsigned physics_shader_local_group_size_x = 64;
     try {
         GLuint compute_shader = Shaders::create_shader(exe_folder + "../src/shaders/physics.comp", GL_COMPUTE_SHADER);
 
@@ -209,18 +168,24 @@ int main() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    //w component is ignored
-    std::vector<glm::vec4> particle_positions(2);
-    particle_positions[0] = glm::vec4(-5.f, 0.f, -3.f, 0.f);
-    particle_positions[1] = glm::vec4(5.f, 0.f, -3.f, 0.f);
+    std::size_t n_particles = 10000;
 
     //w component is ignored
-    std::vector<glm::vec4> particle_velocities(2, glm::vec4(0.f, 0.f, 0.f, 0.f));
-    particle_velocities[0].z = 0.2f;
-    particle_velocities[1].z = -0.2f;
+    std::vector<glm::vec4> particle_positions(n_particles);
 
     //w component is ignored
-    std::vector<glm::vec4> particle_accelerations(2, glm::vec4(0.f, 0.f, 0.f, 0.f));
+    std::vector<glm::vec4> particle_velocities(n_particles, glm::vec4(0.f, 0.f, 0.f, 0.f));
+
+    //w component is ignored
+    std::vector<glm::vec4> particle_accelerations(n_particles, glm::vec4(0.f, 0.f, 0.f, 0.f));
+
+    for (std::size_t i = 0; i < n_particles; i++) {
+
+        particle_positions[i].x = random_float(-100.f, 100.f);
+        particle_positions[i].y = random_float(-100.f, 100.f);
+        particle_positions[i].z = random_float(-100.f, 100.f);
+
+    }
 
     //SSBOs
 
@@ -246,7 +211,7 @@ int main() {
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     Camera::Camera camera;
-    camera.MovementSpeed = 1.f;
+    camera.MovementSpeed = 25.f;
     camera.MouseSensitivity = 0.05f;
     camera.Zoom = 1.f;
 
@@ -285,6 +250,8 @@ int main() {
 
         glm::vec2 cursor_delta = end_cursor_pos - start_cursor_pos;
 
+        std::printf("fps = %f\n", fps);
+
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
             camera.ProcessKeyboard(Camera::Camera_Movement::FORWARD, delta_time);
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -311,50 +278,24 @@ int main() {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
 
-        std::size_t n_particles = 2;
-
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particle_positions_ssbo);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_accelerations_ssbo);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, particle_velocities_ssbo);
 
         //physics
 
-        //Compute Shader
         glUseProgram(physics_shader_program);
 
         {
             glUniform1f(glGetUniformLocation(physics_shader_program, "G"), 1.f);
-            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), 1.f);
+            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), 10.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "particle_radius"), 1.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "delta_time"), delta_time);
-            glUniform1i(glGetUniformLocation(physics_shader_program, "n_particles"), 2);
+            glUniform1i(glGetUniformLocation(physics_shader_program, "n_particles"), n_particles);
 
-            /*
-            GLint position_ssbo_binding = 0;
-            //GLint block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
-            //glShaderStorageBlockBinding(physics_shader_program, block_index, particle_positions_ssbo);
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, particle_positions_ssbo);
-            
-            GLint velocity_ssbo_binding = 1;
-            //block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_velocities_buffer");
-            //glShaderStorageBlockBinding(physics_shader_program, block_index, particle_velocities_ssbo);
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, velocity_ssbo_binding, particle_velocities_ssbo);
-
-            GLint acceleration_ssbo_binding = 2;
-            //block_index = glGetProgramResourceIndex(physics_shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
-            //glShaderStorageBlockBinding(physics_shader_program, block_index, particle_accelerations_ssbo);
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, particle_accelerations_ssbo);*/
-
-            glDispatchCompute(n_particles, 1, 1);
-            //glCheckError();
-            //assert(glGetError() == GL_NO_ERROR);
+            glDispatchCompute(static_cast<GLuint>(std::ceil(static_cast<float>(n_particles)/physics_shader_local_group_size_x)), 1, 1);
 
             glMemoryBarrier(GL_ALL_BARRIER_BITS);
-
-            /*
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, 0);
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, velocity_ssbo_binding, 0);
-            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, 0);*/
 
             glUseProgram(0);
         }
@@ -365,24 +306,12 @@ int main() {
 
         {
             glUniformMatrix4fv(glGetUniformLocation(shader_program, "vp_mat"), 1, GL_FALSE, glm::value_ptr(cam_mat)); //View and projection matrix
-
-            //GLint position_ssbo_binding = 0;
-            //GLint block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_positions_buffer");
-            //glShaderStorageBlockBinding(shader_program, block_index, particle_positions_ssbo);
-            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, particle_positions_ssbo);
-
-            //GLint acceleration_ssbo_binding = 1;
-            //block_index = glGetProgramResourceIndex(shader_program, GL_SHADER_STORAGE_BUFFER, "particle_accelerations_buffer");
-            //glShaderStorageBlockBinding(shader_program, block_index, particle_accelerations_ssbo);
-            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, particle_accelerations_ssbo);
             
             glBindVertexArray(vao);
-            glDrawArraysInstanced(GL_TRIANGLES, 0, vertices.size(), 2);
+            glDrawArraysInstanced(GL_TRIANGLES, 0, vertices.size(), n_particles);
 
             glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
-            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, position_ssbo_binding, 0);
-            //glBindBufferBase(GL_SHADER_STORAGE_BUFFER, acceleration_ssbo_binding, 0);
             glUseProgram(0);
         }
         

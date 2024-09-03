@@ -21,7 +21,7 @@ uniform float delta_time;
 
 uniform int n_particles;
 
-layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 void gravity(int thread_idx, int other_idx) {
 
@@ -66,8 +66,8 @@ void main() {
 
     for (int i = 0; i < n_particles; i++) {
         if (i == thread_idx) continue;
-        gravity(thread_idx, i);
         collision(thread_idx, i);
+        gravity(thread_idx, i);
     }
 
     //Apply acceleration and velocity

@@ -21,9 +21,7 @@ void main() {
     vec4 blue = vec4(0.0, 0.47, 0.95, 1.0);
     vec4 red = vec4(0.90, 0.16, 0.22, 1.0);
 
-    float t = length(particle_accelerations[gl_InstanceID]) / 5.0;
+    float t = length(particle_accelerations[gl_InstanceID]) / 200.0;
     t = clamp(t, 0.0, 1.0);
     color = mix(blue, red, t);
-
-    //particle_positions[gl_InstanceID].x += 0.01;
 }
