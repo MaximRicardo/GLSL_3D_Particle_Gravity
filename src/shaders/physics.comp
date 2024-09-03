@@ -12,8 +12,11 @@ layout (std430, binding=2) buffer particle_velocities_buffer {
     vec4 particle_velocities[];
 };
 
+layout (std430, binding=4) readonly buffer particle_radii_buffer {
+    float particle_radii[];
+};
+
 uniform float particle_mass;
-uniform float particle_radius;
 uniform float particle_light_strength;
 
 uniform float G;
@@ -21,6 +24,8 @@ uniform float G;
 uniform float delta_time;
 
 uniform int n_particles;
+
+float PI = 3.141592;
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -38,10 +43,14 @@ void gravity(int thread_idx, int other_idx, inout vec3 acceleration) {
 
 void collision(int thread_idx, int other_idx) {
 
-    float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz);
-    if (dist >= particle_radius*2.0) return;
+    float self_radius = particle_radii[thread_idx];
+    float other_radius = particle_radii[other_idx];
+    float radius_sum = self_radius+other_radius;
 
-    float move_back_amount = particle_radius*2.0 - dist;
+    float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz);
+    if (dist >= radius_sum) return;
+
+    float move_back_amount = radius_sum - dist;
     vec3 move_back_dir = particle_positions[thread_idx].xyz-particle_positions[other_idx].xyz;
     if (move_back_dir.length() == 0.0) return;
     move_back_dir = normalize(move_back_dir);
@@ -71,7 +80,7 @@ void main() {
         //collision(thread_idx, i);
         gravity(thread_idx, i, acceleration);
         float dist_squared = pow(distance(particle_positions[thread_idx].xyz, particle_positions[i].xyz), 2.0);
-        if (dist_squared != 0.0) particle_lighting[thread_idx] += particle_light_strength / dist_squared;
+        if (dist_squared != 0.0) particle_lighting[thread_idx] += (2.0*PI*pow(particle_radii[i],2.0))*particle_light_strength / dist_squared;
     }
 
     //Apply acceleration and velocity

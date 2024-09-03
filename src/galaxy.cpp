@@ -1,5 +1,6 @@
 #include <cmath>
 
+#include "random.hpp"
 #include "galaxy.hpp"
 
 namespace {
@@ -19,25 +20,8 @@ namespace {
     constexpr float arm_x_mean = 200.f;
     constexpr float arm_z_mean = 100.f;
 
-    constexpr unsigned spiral = 6;
-    constexpr unsigned arms = 2;
-
-    float random_float(float a, float b) {
-        float random = ((float) rand()) / (float) RAND_MAX;
-        float diff = b - a;
-        float r = random * diff;
-        return a + r;
-    }
-
-    float gaus_rand(float mean, float stddev) {
-
-        float u = 1 - random_float(0.f, 1.f);
-        float v = random_float(0.f, 1.f);
-        float z = std::sqrt(-2.f*std::log(u)) * std::cos(2.f*PI*v);
-
-        return z*stddev+mean;
-
-    }
+    constexpr unsigned spiral = 1;
+    constexpr unsigned arms = 4;
 
     glm::vec4 spiral_point(glm::vec3 p, float offset) {
         float r = std::sqrt(p.x*p.x+p.z*p.z);
@@ -51,26 +35,28 @@ namespace {
 
 namespace Galaxy {
 
-    std::vector<glm::vec4> generate_galaxy(std::size_t n_points, float radius) {
+    std::vector<glm::vec4> generate_galaxy(std::size_t n_points, glm::vec3 center) {
 
         std::vector<glm::vec4> points;
 
+        glm::vec4 center_as_vec4 = glm::vec4(center, 0.f);
+
         for (std::size_t i = 0; i < n_points/4; i++) {
             points.push_back(glm::vec4(
-                        gaus_rand(0, core_x_dist), gaus_rand(0, galaxy_thickness), gaus_rand(0, core_z_dist), 0.f
-                    ));
+                        RandomNum::gaus_rand(0, core_x_dist), RandomNum::gaus_rand(0, galaxy_thickness), RandomNum::gaus_rand(0, core_z_dist), 0.f
+                    )+center_as_vec4);
         }
 
         for (std::size_t i = 0; i < n_points/4; i++) {
             points.push_back(glm::vec4(
-                        gaus_rand(0, outer_core_x_dist), gaus_rand(0, galaxy_thickness), gaus_rand(0, outer_core_z_dist), 0.f
-                    ));
+                        RandomNum::gaus_rand(0, outer_core_x_dist), RandomNum::gaus_rand(0, galaxy_thickness), RandomNum::gaus_rand(0, outer_core_z_dist), 0.f
+                    )+center_as_vec4);
         }
 
         for (std::size_t i = 0; i < arms; i++) {
-            for (std::size_t j = 0; j < n_points/4; j++) {
+            for (std::size_t j = 0; j < n_points/(arms*2); j++) {
                 points.push_back(
-                        spiral_point(glm::vec3(gaus_rand(arm_x_mean, arm_x_dist), gaus_rand(0.f, galaxy_thickness), gaus_rand(arm_z_mean, arm_z_dist)), (float)i*2.f*PI/(float)arms)
+                        spiral_point(glm::vec3(RandomNum::gaus_rand(arm_x_mean, arm_x_dist), RandomNum::gaus_rand(0.f, galaxy_thickness), RandomNum::gaus_rand(arm_z_mean, arm_z_dist)), (float)i*2.f*PI/(float)arms)+center_as_vec4
                         );
             }
         }

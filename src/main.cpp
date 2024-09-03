@@ -37,6 +37,7 @@
 #include "sphere.hpp"
 #include "camera.hpp"
 #include "galaxy.hpp"
+#include "colors.hpp"
 
 std::string get_exe_path() {
 
@@ -74,13 +75,6 @@ glm::vec2 get_cursor_pos(GLFWwindow *window) {
     glfwGetCursorPos(window, &x, &y);
 
     return glm::vec2(x, y);
-}
-
-float random_float(float a, float b) {
-    float random = ((float) rand()) / (float) RAND_MAX;
-    float diff = b - a;
-    float r = random * diff;
-    return a + r;
 }
 
 int main() {
@@ -238,18 +232,21 @@ int main() {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
 
-    std::size_t n_base_colors = 3;
-    std::vector<glm::vec4> base_colors(n_base_colors);
-    base_colors[0] = glm::vec4(1.f, 1.f, 1.f, 1.f);         //White
-    base_colors[1] = glm::vec4(0.f, 0.47f, 0.95f, 1.f);     //Blue
-    base_colors[2] = glm::vec4(0.9f, 0.16f, 0.22f, 1.f);    //Red
+    std::size_t n_particles = 40000;
 
-    for (std::size_t i = 0; i < n_base_colors; i++) base_colors[i] = glm::vec4(glm::normalize(glm::vec3(base_colors[i])), base_colors[i].w);
-
-    std::size_t n_particles = 10000;
+    std::array<glm::vec3, 2> galaxy_centers = {
+        glm::vec3(-500.f, 0.f, 0.f),
+        glm::vec3(500.f, 0.f, 0.f)
+    };
 
     //w component is ignored
-    std::vector<glm::vec4> particle_positions = Galaxy::generate_galaxy(n_particles, 100.f);
+    std::vector<glm::vec4> particle_positions = Galaxy::generate_galaxy(n_particles/galaxy_centers.size(), galaxy_centers[0]);
+    for (std::size_t i = 0; i < galaxy_centers.size()-1; i++){
+        std::vector<glm::vec4> other_particle_positions = Galaxy::generate_galaxy(n_particles/galaxy_centers.size(), galaxy_centers[1]);
+        for (auto& particle_pos : other_particle_positions) particle_positions.push_back(particle_pos);
+    }
+
+    std::printf("particle_positions size = %zu\n", particle_positions.size());
 
     //w component is ignored
     std::vector<glm::vec4> particle_velocities(n_particles, glm::vec4(0.f, 0.f, 0.f, 0.f));
@@ -257,23 +254,34 @@ int main() {
     //y, z and w components are ignored, std430 rounds everything up to vec4 sizes
     std::vector<glm::vec4> particle_lighting(n_particles);
 
+    //same as with particle_lighting
+    std::vector<glm::vec4> particle_radii(n_particles);
+
     std::vector<glm::vec4> particle_base_colors(n_particles);
 
     for (std::size_t i = 0; i < n_particles; i++) {
 
         //Starting velocities
 
-        float dist = glm::distance(glm::vec3(particle_positions[i]), glm::vec3(0.f, 0.f, 0.f));
-        glm::vec3 up(0.f, 1.f, 0.f);
-        glm::vec3 dir = glm::cross(up, glm::normalize(glm::vec3(particle_positions[i])));
+        glm::vec3 galaxy_center = galaxy_centers[i/(n_particles/galaxy_centers.size())];
 
-        float mult = 0.1f;
-        particle_velocities[i] = glm::vec4(dir*mult*dist, 1.f);
+        float dist = glm::distance(glm::vec3(particle_positions[i]), galaxy_center);
+        glm::vec3 up(0.f, 1.f, 0.f);
+        glm::vec3 dir = glm::cross(glm::normalize(galaxy_center - glm::vec3(particle_positions[i])), up);
+
+        float mult = 23.f;
+        if (dist < 100.f) mult = 10.f;
+        particle_velocities[i] = glm::vec4(dir*mult, 1.f);
 
         //Base colors
 
-        unsigned idx = std::round(random_float(0.f, n_base_colors-1));
-        particle_base_colors[i] = base_colors[idx];
+        std::size_t idx = Colors::rand_star_color_idx();
+        particle_base_colors[i] = glm::vec4(glm::normalize(glm::vec3(Colors::star_colors[idx])), 1.f);
+
+        //Radii
+
+        //sqrt(sqrt(x)) lez gooo
+        particle_radii[i] = glm::vec4(std::sqrt(static_cast<float>(idx+1)), 0.f, 0.f, 0.f);
 
     }
 
@@ -305,6 +313,13 @@ int main() {
 
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_base_colors_ssbo);
     glBufferData(GL_SHADER_STORAGE_BUFFER, particle_base_colors.size()*sizeof(particle_base_colors[0]), glm::value_ptr(particle_base_colors[0]), GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    GLuint particle_radii_ssbo;
+    glGenBuffers(1, &particle_radii_ssbo);
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, particle_radii_ssbo);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, particle_radii.size()*sizeof(particle_radii[0]), particle_radii.data(), GL_DYNAMIC_DRAW);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
     Camera::Camera camera(glm::vec3(0.f, 0.f, 100.f));
@@ -441,6 +456,7 @@ int main() {
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particle_lighting_ssbo);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, particle_velocities_ssbo);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, particle_base_colors_ssbo);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, particle_radii_ssbo);
 
         //physics
 
@@ -449,8 +465,7 @@ int main() {
         if (!paused) {
             glUniform1f(glGetUniformLocation(physics_shader_program, "G"), 1.f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), 10.f);
-            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_radius"), 1.f);
-            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_light_strength"), 1.f);
+            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_light_strength"), 0.5f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "delta_time"), delta_time);
             glUniform1i(glGetUniformLocation(physics_shader_program, "n_particles"), n_particles);
 
@@ -518,7 +533,6 @@ int main() {
 
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, color_buffers[0]);
-            //glBindTexture(GL_TEXTURE_2D, ping_pong_color_buffers[blur_horizontal]);
             glActiveTexture(GL_TEXTURE1);
             glBindTexture(GL_TEXTURE_2D, ping_pong_color_buffers[!blur_horizontal]);
 
@@ -529,14 +543,6 @@ int main() {
             
             glUseProgram(0);
         }
-
-        /*
-        for (unsigned i = 0; i < 2; i++) {
-            glBindFramebuffer(GL_FRAMEBUFFER, ping_pong_fbo[i]);
-            glClear(GL_COLOR_BUFFER_BIT);
-            glClearColor(0.f, 0.f, 0.f, 1.f);
-        }
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);*/
         
         glfwSwapBuffers(window);
         glfwPollEvents();
