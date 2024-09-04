@@ -7,21 +7,21 @@ namespace {
 
     constexpr float PI = 3.141592;
 
-    constexpr float core_x_dist = 33.f;
-    constexpr float core_z_dist = 33.f;
+    constexpr float core_x_dist = 66.f;
+    constexpr float core_z_dist = 66.f;
     
     constexpr float outer_core_x_dist = 100.f;
     constexpr float outer_core_z_dist = 100.f;
 
-    constexpr float galaxy_thickness = 5.f;
+    constexpr float galaxy_thickness = 10.f;
 
     constexpr float arm_x_dist = 100.f;
     constexpr float arm_z_dist = 50.f;
     constexpr float arm_x_mean = 200.f;
     constexpr float arm_z_mean = 100.f;
 
-    constexpr unsigned spiral = 1;
-    constexpr unsigned arms = 4;
+    constexpr unsigned spiral = 2;
+    constexpr unsigned arms = 2;
 
     glm::vec4 spiral_point(glm::vec3 p, float offset) {
         float r = std::sqrt(p.x*p.x+p.z*p.z);

@@ -25,19 +25,20 @@ uniform float delta_time;
 
 uniform int n_particles;
 
-float PI = 3.141592;
+const float PI = 3.141592;
+const float epsilon = 0.1f;
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 void gravity(int thread_idx, int other_idx, inout vec3 acceleration) {
 
-    float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz);
-    if (dist == 0) return;
+    bool is_same = thread_idx == other_idx;
+    float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz) + epsilon;
 
-    float f = particle_mass*G/pow(dist, 2.0);    
-    vec3 dir = normalize(particle_positions[other_idx].xyz - particle_positions[thread_idx].xyz);
+    float f = particle_mass*G/pow(dist, 2.0);
+    vec3 dir = normalize(particle_positions[other_idx].xyz - particle_positions[thread_idx].xyz + vec3(float(is_same), 0.0, 0.0));
 
-    acceleration.xyz += dir*f;
+    acceleration.xyz += dir*f*float(!is_same);
 
 }
 
@@ -72,15 +73,15 @@ void main() {
     int thread_idx = int(gl_GlobalInvocationID.x);
     if (thread_idx >= n_particles) return;
 
-    particle_lighting[thread_idx] = 0.0;
+    particle_lighting[thread_idx] = pow(particle_light_strength,2.0)*12.0*particle_light_strength;
     vec3 acceleration = vec3(0.0, 0.0, 0.0);
 
     for (int i = 0; i < n_particles; i++) {
-        if (i == thread_idx) continue;
+        bool is_same = i == thread_idx;
         //collision(thread_idx, i);
         gravity(thread_idx, i, acceleration);
         float dist_squared = pow(distance(particle_positions[thread_idx].xyz, particle_positions[i].xyz), 2.0);
-        if (dist_squared != 0.0) particle_lighting[thread_idx] += (2.0*PI*pow(particle_radii[i],2.0))*particle_light_strength / dist_squared;
+        if (dist_squared != 0.0) particle_lighting[thread_idx] += ((2.0*PI*pow(particle_radii[i],2.0))*particle_light_strength / dist_squared)*float(!is_same);
     }
 
     //Apply acceleration and velocity

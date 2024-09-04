@@ -88,6 +88,7 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, true);
 
     //Create a glfw window
@@ -187,7 +188,7 @@ int main() {
         return EXIT_FAILURE;
     }
     
-    std::vector<float> sphere_vertices = Sphere::sphere_vertices(16, 16, 1.f);
+    std::vector<float> sphere_vertices = Sphere::sphere_vertices(10, 10, 1.f);
 
     GLuint vao;
     glGenVertexArrays(1, &vao);
@@ -232,11 +233,12 @@ int main() {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
 
-    std::size_t n_particles = 40000;
+    std::size_t n_particles = 100000;
+    float particle_mass = 10.f/(static_cast<float>(n_particles)/2000.f);
 
-    std::array<glm::vec3, 2> galaxy_centers = {
+    std::array<glm::vec3, 1> galaxy_centers = {
         glm::vec3(-500.f, 0.f, 0.f),
-        glm::vec3(500.f, 0.f, 0.f)
+        //glm::vec3(500.f, 0.f, 0.f)
     };
 
     //w component is ignored
@@ -269,8 +271,12 @@ int main() {
         glm::vec3 up(0.f, 1.f, 0.f);
         glm::vec3 dir = glm::cross(glm::normalize(galaxy_center - glm::vec3(particle_positions[i])), up);
 
-        float mult = 23.f;
-        if (dist < 100.f) mult = 10.f;
+        //float mult = 25.f;
+        float mult = 7.5f;
+        if (dist < 200.f) mult = 0.05f*dist;
+        //Half the particles are within the core
+        if (dist < 66.f) mult = sqrt((particle_mass*n_particles/2.f)*dist)/125.f;
+        if (dist < 33.f) mult = sqrt((particle_mass*n_particles/8.f))/100.f*0.f;
         particle_velocities[i] = glm::vec4(dir*mult, 1.f);
 
         //Base colors
@@ -411,7 +417,7 @@ int main() {
 
         glm::vec2 cursor_delta = end_cursor_pos - start_cursor_pos;
 
-        //std::printf("fps = %f\n", fps);
+        std::printf("fps = %f\n", fps);
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
             camera.ProcessKeyboard(Camera::Camera_Movement::FORWARD, delta_time);
@@ -464,14 +470,14 @@ int main() {
 
         if (!paused) {
             glUniform1f(glGetUniformLocation(physics_shader_program, "G"), 1.f);
-            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), 10.f);
+            glUniform1f(glGetUniformLocation(physics_shader_program, "particle_mass"), particle_mass);
             glUniform1f(glGetUniformLocation(physics_shader_program, "particle_light_strength"), 0.5f);
             glUniform1f(glGetUniformLocation(physics_shader_program, "delta_time"), delta_time);
             glUniform1i(glGetUniformLocation(physics_shader_program, "n_particles"), n_particles);
 
             glDispatchCompute(static_cast<GLuint>(std::ceil(static_cast<float>(n_particles)/physics_shader_local_group_size_x)), 1, 1);
 
-            glMemoryBarrier(GL_ALL_BARRIER_BITS);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
             glUseProgram(0);
         }
@@ -490,8 +496,6 @@ int main() {
 
             glBindVertexArray(vao);
             glDrawArraysInstanced(GL_TRIANGLES, 0, sphere_vertices.size(), n_particles);
-
-            glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
             glUseProgram(0);
         }
@@ -537,7 +541,7 @@ int main() {
             glBindTexture(GL_TEXTURE_2D, ping_pong_color_buffers[!blur_horizontal]);
 
             glUniform1i(glGetUniformLocation(final_shader_program, "bloom"), use_bloom);
-            glUniform1f(glGetUniformLocation(final_shader_program, "exposure"), 1.f);
+            glUniform1f(glGetUniformLocation(final_shader_program, "exposure"), 0.1f);
 
             glDrawArrays(GL_TRIANGLES, 0, 6);
             
