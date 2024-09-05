@@ -14,8 +14,11 @@ void main() {
     vec4 bloom_color = texture(bloom_blur, tex_coords).rgba;
 
     vec3 blue = vec3(0.4, 0.6, 1.0);
-    vec3 bloom_as_blue = blue*sqrt(length(bloom_color.rgb));
+    vec3 pink = vec3(1.0, 0.75, 0.8);
 
-    frag_color = vec4(bloom_as_blue, clamp(bloom_color.a/250.0, 0.0, 1.0));
+    vec3 base_color = blue;
+    vec3 bloom_as_blue = base_color*sqrt(length(bloom_color.rgb));
+
+    frag_color = vec4(bloom_as_blue, clamp(bloom_color.a/250.0, 0.0, 0.75));
 
 }

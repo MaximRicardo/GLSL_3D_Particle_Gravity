@@ -418,6 +418,9 @@ int main() {
     bool use_bloom = true;
     bool r_still_down = false;
 
+    bool render_gas = true;
+    bool f_still_down = false;
+
     bool paused = false;
     bool space_still_down = false;
 
@@ -455,11 +458,17 @@ int main() {
         }
         else if (glfwGetKey(window, GLFW_KEY_R) == GLFW_RELEASE) r_still_down = false;
 
+        if (glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS && !f_still_down) {
+            render_gas = !render_gas;
+            f_still_down = true;
+        }
+        else if (glfwGetKey(window, GLFW_KEY_F) == GLFW_RELEASE) f_still_down = false;
+
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && !space_still_down) {
             paused = !paused;
             space_still_down = true;
         }
-        else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_RELEASE)  space_still_down = false;
+        else if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_RELEASE) space_still_down = false;
 
         camera.ProcessMouseMovement(cursor_delta.x, -cursor_delta.y);
 
@@ -467,7 +476,7 @@ int main() {
         glm::mat4 cam_mat = cam_projection_mat * camera.GetViewMatrix();
 
         glBindFramebuffer(GL_FRAMEBUFFER, hdr_fbo);
-        glClearColor(0.f, 0.f, 0.f, 1.f);
+        glClearColor(0.f, 0.f, 0.f, 0.f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glEnable(GL_DEPTH_TEST);
@@ -572,7 +581,7 @@ int main() {
         }
 
         glUseProgram(gas_shader_program);
-        {
+        if (render_gas) {
             glDisable(GL_DEPTH_TEST);
 
             glBindVertexArray(screen_vao);
