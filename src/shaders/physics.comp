@@ -25,6 +25,10 @@ uniform float delta_time;
 
 uniform int n_particles;
 
+uniform vec3 cam_pos;
+
+uniform bool paused;
+
 const float PI = 3.141592;
 const float epsilon = 0.1f;
 
@@ -35,35 +39,19 @@ void gravity(int thread_idx, int other_idx, inout vec3 acceleration) {
     bool is_same = thread_idx == other_idx;
     float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz) + epsilon;
 
-    float f = particle_mass*G/pow(dist, 2.0);
+    float f = particle_mass*G*pow(dist, -2.0);
     vec3 dir = normalize(particle_positions[other_idx].xyz - particle_positions[thread_idx].xyz + vec3(float(is_same), 0.0, 0.0));
 
-    acceleration.xyz += dir*f*float(!is_same);
+    acceleration.xyz = dir*f*float(!is_same) + acceleration.xyz;  //MAD >:(
 
 }
 
-void collision(int thread_idx, int other_idx) {
+void compute_light(int thread_idx, int i, float cam_dist) {
 
-    float self_radius = particle_radii[thread_idx];
-    float other_radius = particle_radii[other_idx];
-    float radius_sum = self_radius+other_radius;
-
-    float dist = distance(particle_positions[thread_idx].xyz, particle_positions[other_idx].xyz);
-    if (dist >= radius_sum) return;
-
-    float move_back_amount = radius_sum - dist;
-    vec3 move_back_dir = particle_positions[thread_idx].xyz-particle_positions[other_idx].xyz;
-    if (move_back_dir.length() == 0.0) return;
-    move_back_dir = normalize(move_back_dir);
-
-    particle_positions[thread_idx].xyz += move_back_dir*move_back_amount;
-
-    vec3 n = -move_back_dir;
-    float this_d = dot(particle_velocities[thread_idx].xyz, n);
-    if (this_d > 0.0) {
-        particle_velocities[thread_idx].xyz -= n*this_d;
-
-        particle_velocities[other_idx].xyz += n*this_d/1.1;
+    float dist_squared = pow(distance(particle_positions[thread_idx].xyz, particle_positions[i].xyz), 2.0);
+    if (dist_squared != 0.0 && i != thread_idx) {
+        float other_visible_radius = clamp(particle_radii[i] * cam_dist*(1.0/250.0), particle_radii[i]*(1.0/10.0), particle_radii[i]);
+        particle_lighting[thread_idx] = (2.0*PI*pow(other_visible_radius,2.0))*particle_light_strength / dist_squared + particle_lighting[thread_idx];
     }
 
 }
@@ -73,19 +61,28 @@ void main() {
     int thread_idx = int(gl_GlobalInvocationID.x);
     if (thread_idx >= n_particles) return;
 
-    particle_lighting[thread_idx] = pow(particle_light_strength,2.0)*12.0*particle_light_strength;
+    float cam_dist = distance(cam_pos.xyz, particle_positions[thread_idx].xyz);
+
+    particle_lighting[thread_idx] = pow(particle_radii[thread_idx],2.0)*particle_light_strength;
     vec3 acceleration = vec3(0.0, 0.0, 0.0);
 
-    for (int i = 0; i < n_particles; i++) {
-        bool is_same = i == thread_idx;
-        //collision(thread_idx, i);
-        gravity(thread_idx, i, acceleration);
-        float dist_squared = pow(distance(particle_positions[thread_idx].xyz, particle_positions[i].xyz), 2.0);
-        if (dist_squared != 0.0) particle_lighting[thread_idx] += ((2.0*PI*pow(particle_radii[i],2.0))*particle_light_strength / dist_squared)*float(!is_same);
+    if (!paused) {
+        for (int i = 0; i < n_particles; i++) {
+            gravity(thread_idx, i, acceleration); //Not doing this if the program is paused lowers the fps by about 5 - 10 on my machine.
+            
+            compute_light(thread_idx, i, cam_dist);
+        }
+    }
+    else {
+        for (int i = 0; i < n_particles; i++) {
+            compute_light(thread_idx, i, cam_dist);
+        }
     }
 
     //Apply acceleration and velocity
-    particle_velocities[thread_idx].xyz += acceleration.xyz*delta_time;
-    particle_positions[thread_idx].xyz += particle_velocities[thread_idx].xyz*delta_time;
+    if (!paused) {
+        particle_velocities[thread_idx].xyz += acceleration.xyz*delta_time;
+        particle_positions[thread_idx].xyz += particle_velocities[thread_idx].xyz*delta_time;
+    }
     
 }

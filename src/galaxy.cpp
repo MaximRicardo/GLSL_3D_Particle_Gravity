@@ -20,7 +20,7 @@ namespace {
     constexpr float arm_x_mean = 200.f;
     constexpr float arm_z_mean = 100.f;
 
-    constexpr unsigned spiral = 2;
+    constexpr unsigned spiral = 3;
     constexpr unsigned arms = 2;
 
     glm::vec4 spiral_point(glm::vec3 p, float offset) {
