@@ -18,9 +18,9 @@ None as of yet.
 
 WASD:   Moving around
 
-Q:      Move up
+E:      Move up
 
-E:      Move down
+Q:      Move down
 
 MOUSE:  Look around
 
