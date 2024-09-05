@@ -5,6 +5,6 @@
 
 namespace Galaxy {
 
-    std::vector<glm::vec4> generate_galaxy(std::size_t n_points, float radius);
+    std::vector<glm::vec4> generate_galaxy(std::size_t n_points, glm::vec3 center);
 
 }

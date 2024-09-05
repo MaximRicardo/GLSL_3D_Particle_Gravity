@@ -6,15 +6,6 @@ layout (location=1) out vec4 bright_color;
 in vec4 color;
 
 void main() {
-    /*
-    frag_color = vec4(
-        clamp(color.x, 0.0, 1.0),
-        clamp(color.y, 0.0, 1.0),
-        clamp(color.z, 0.0, 1.0),
-        clamp(color.w, 0.0, 1.0)
-    );
-    */
-
     frag_color = color;
 
     //Is the fragment bright enough, if so output as a brightness color
